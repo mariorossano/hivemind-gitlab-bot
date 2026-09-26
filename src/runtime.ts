@@ -15,6 +15,7 @@ import { RepositoryWatch } from './watch.ts';
 import { categories, eventTypes } from './watch-reader.ts';
 import { LocalHiveSession, hiveOrigin } from './hive-session.ts';
 import { launchMonitor, acceptMonitorStart } from './monitor-startup.ts';
+import { initializeStorage } from './storage.ts';
 export { hiveOrigin } from './hive-session.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -51,23 +52,17 @@ export class GitLabBot {
     this.config.hiveUrl = hiveOrigin(this.config.hiveUrl);
     this.#session = new LocalHiveSession(this.config.hiveUrl);
     this.db = new DatabaseSync(path.join(home, 'state.db'));
-    chmodSync(path.join(home, 'state.db'), 0o600);
-    this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS bots(project TEXT PRIMARY KEY,id TEXT NOT NULL,name TEXT NOT NULL,token TEXT NOT NULL); CREATE TABLE IF NOT EXISTS subscriptions(id TEXT PRIMARY KEY,url TEXT NOT NULL,channel TEXT NOT NULL,bot TEXT NOT NULL,enabled INTEGER NOT NULL,initialized INTEGER NOT NULL DEFAULT 0,initial TEXT NOT NULL,next_at INTEGER NOT NULL DEFAULT 0,failures INTEGER NOT NULL DEFAULT 0,last_error TEXT,last_poll INTEGER,last_queued INTEGER,usage TEXT,warnings TEXT,UNIQUE(url,channel)); CREATE TABLE IF NOT EXISTS items(subscription TEXT NOT NULL,item TEXT NOT NULL,hash TEXT NOT NULL,revision INTEGER NOT NULL,PRIMARY KEY(subscription,item)); CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,subscription TEXT NOT NULL,event TEXT NOT NULL,state TEXT NOT NULL DEFAULT "pending",attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,error TEXT,messageid TEXT);'.replace('"pending"', "'pending'"));
-    const identity = hash([definitionId, this.config.hiveUrl, this.config.host]);
-    const saved = this.db.prepare('SELECT value FROM meta WHERE key=?').get('identity') as any;
-    if (saved && saved.value !== identity) { this.close(); throw new Error('Profile belongs to a different Hivemind/provider host; use a new --home'); }
-    this.db.prepare('INSERT OR IGNORE INTO meta VALUES (?,?)').run('identity', identity);
-    this.lifecycle = new SourceLifecycle(this.db, (...args) => this.request(...args), label);
-    this.db.exec('BEGIN IMMEDIATE');
     try {
-      const cols=this.db.prepare('PRAGMA table_info(subscriptions)').all();
-      if(!cols.some(c=>c.name==='source_kind'))this.db.exec("ALTER TABLE subscriptions ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'mr'");
-      if(!cols.some(c=>c.name==='event_filter'))this.db.exec('ALTER TABLE subscriptions ADD COLUMN event_filter TEXT');
-      if(!cols.some(c=>c.name==='observed_after'))this.db.exec('ALTER TABLE subscriptions ADD COLUMN observed_after INTEGER');
-      if(!this.db.prepare('PRAGMA table_info(items)').all().some(c=>c.name==='value'))this.db.exec('ALTER TABLE items ADD COLUMN value TEXT');
-      this.db.exec('COMMIT');
-    } catch(error){this.db.exec('ROLLBACK');throw error;}
-    this.watch = new RepositoryWatch(this);
+      chmodSync(path.join(home, 'state.db'), 0o600);
+      this.db.exec('PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL');
+      initializeStorage(this.db);
+      const identity = hash([definitionId, this.config.hiveUrl, this.config.host]);
+      const saved = this.db.prepare('SELECT value FROM meta WHERE key=?').get('identity') as any;
+      if (saved && saved.value !== identity) throw new Error('Profile belongs to a different Hivemind/provider host; use a new --home');
+      this.db.prepare('INSERT OR IGNORE INTO meta VALUES (?,?)').run('identity', identity);
+      this.lifecycle = new SourceLifecycle(this.db, (...args) => this.request(...args), label);
+      this.watch = new RepositoryWatch(this);
+    } catch (error) { this.db.close(); throw error; }
   }
   close() { this.db.close(); }
   async request(route: string, options: RequestInit = {}, signal?: AbortSignal): Promise<any> {
@@ -311,15 +306,15 @@ export class GitLabBot {
 
 export async function main(args: string[]) {
   process.umask(0o077);
-  const options = Object.fromEntries(['home', 'hive-url', 'host', 'executable', 'cwd', 'launch-mode', 'launcher', 'tool-name', 'model', 'effort', 'interval', 'max-pages', 'timeout', 'channel', 'initial', 'id', 'event-id', 'reason', 'max-polls', 'brain', 'label', 'authors', 'exclude-authors', 'events'].map(k => [k, { type: 'string' as const }]));
-  const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: { ...options, help: { type: 'boolean' }, 'no-start': { type: 'boolean' }, 'confirm-archive': { type: 'boolean' }, 'managed-start': { type: 'boolean' } } });
+  const options = Object.fromEntries(['home', 'hive-url', 'host', 'executable', 'interval', 'max-pages', 'timeout', 'channel', 'initial', 'id', 'max-polls', 'brain', 'label', 'authors', 'exclude-authors', 'events'].map(k => [k, { type: 'string' as const }]));
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: { ...options, help: { type: 'boolean' }, 'no-start': { type: 'boolean' }, 'managed-start': { type: 'boolean' } } });
   const command = positionals[0];
   const managedStart = values['managed-start'] === true;
   if (managedStart && (command !== 'run' || !process.send || !process.connected)) throw new Error('Managed startup requires its parent IPC connection');
   const value = (key: string) => (values as Record<string, unknown>)[key] as string | undefined;
   const home = path.resolve(value('home') ?? path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), definitionId));
   if (!command || command === 'help' || values.help) {
-    console.log(definitionId + '\n  init --hive-url http://127.0.0.1:PORT --host PROVIDER_HOST [provider options]\n  follow URL --channel ID [--initial snapshot|baseline] [--no-start]\n  watch REPOSITORY_URL --channel SUMMARY_CHANNEL --brain NAME [--label EXACT_LABEL] [--authors all|me|USER1,USER2] [--exclude-authors me|USER1,USER2] [--events all|'+eventTypes.join(',')+'] [--initial summary|follow] [--no-start]\n  stop-watch | resume-watch | take-existing --id WATCH_ID\n  list | status | unfollow --id ID\n  start | stop | run [--max-polls N] | poll [--id ID]\n  recover-archived --id SUB --event-id EVENT --confirm-archive --reason EVIDENCE\n  instructions\nEvery command accepts --home /absolute/profile. Follow/watch start polling unless --no-start. No reviews or source writes are assigned. ' + usageNotice); return;
+    console.log(definitionId + '\n  init --hive-url http://127.0.0.1:PORT --host GITLAB_HOST [--executable GLAB_PATH] [--interval SECONDS] [--max-pages N] [--timeout SECONDS]\n  follow URL --channel ID [--initial snapshot|baseline] [--no-start]\n  watch REPOSITORY_URL --channel SUMMARY_CHANNEL --brain NAME [--label EXACT_LABEL] [--authors all|me|USER1,USER2] [--exclude-authors me|USER1,USER2] [--events all|'+eventTypes.join(',')+'] [--initial summary|follow] [--no-start]\n  stop-watch | resume-watch | take-existing --id WATCH_ID\n  list | status | unfollow --id ID\n  start | stop | run [--max-polls N] | poll [--id ID]\n  instructions\nEvery command accepts --home /absolute/profile. Follow/watch start polling unless --no-start. No reviews or source writes are assigned. ' + usageNotice); return;
   }
   if (command === 'instructions') { console.log(readFileSync(path.join(root, 'BOT-TOOLS.md'), 'utf8')); return; }
   if (command === 'invoke') {
@@ -339,11 +334,11 @@ export async function main(args: string[]) {
   }
   if (command === 'init') {
     const config: Record<string, unknown> = {};
-    for (const [flag, key] of Object.entries({ 'hive-url': 'hiveUrl', host: 'host', executable: 'executable', cwd: 'cwd', 'launch-mode': 'launchMode', launcher: 'launcher', 'tool-name': 'toolName', model: 'model', effort: 'effort' })) if (value(flag)) config[key] = value(flag);
+    for (const [flag, key] of Object.entries({ 'hive-url': 'hiveUrl', host: 'host', executable: 'executable' })) if (value(flag)) config[key] = value(flag);
     for (const [flag, key] of Object.entries({ interval: 'intervalSeconds', 'max-pages': 'maxPages', timeout: 'timeoutSeconds' })) if (value(flag)) config[key] = Number(value(flag));
     console.log(JSON.stringify(init(home, config))); return;
   }
-  if (!['follow', 'watch', 'stop-watch', 'resume-watch', 'take-existing', 'list', 'status', 'unfollow', 'start', 'stop', 'poll', 'run', 'recover-archived'].includes(command)) throw new Error('Unknown bot command');
+  if (!['follow', 'watch', 'stop-watch', 'resume-watch', 'take-existing', 'list', 'status', 'unfollow', 'start', 'stop', 'poll', 'run'].includes(command)) throw new Error('Unknown bot command');
   if(command!=='watch' && ['brain','label','authors','exclude-authors','events'].some(k=>value(k)!==undefined))throw new Error('Repository selection flags apply to watch only, not follow');
   if (positionals.length !== (['follow','watch'].includes(command) ? 2 : 1)) throw new Error('Unexpected or missing positional arguments');
   const gitlab = new GitLabBot(home);
@@ -366,17 +361,6 @@ export async function main(args: string[]) {
       } finally {hold();release();}
       if(!values['no-start'])await gitlab.start();
       console.log(JSON.stringify({...configured,monitorRunning:gitlab.isRunning()}));return;
-    }
-    if (command === 'recover-archived') {
-      const sub = gitlab.subscriptions().find(s => s.id === value('id'));
-      const eventId = Number(value('event-id'));
-      if (!sub || !Number.isSafeInteger(eventId) || eventId <= 0 || !values['confirm-archive'] || !value('reason'))
-        throw new Error('Supply --id SUB --event-id EVENT --confirm-archive --reason EVIDENCE; never use for an unexplained 409');
-      const release = gitlab.lock('setup');
-      let hold = () => {};
-      try { hold = gitlab.lock(); console.log(JSON.stringify(await gitlab.lifecycle.recover(sub, eventId, value('reason')!))); }
-      finally { hold(); release(); }
-      return;
     }
     if (command === 'follow') {
       if (!value('channel')) throw new Error('Supply --channel ID');

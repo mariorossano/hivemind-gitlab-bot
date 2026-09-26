@@ -12,8 +12,7 @@ import {definitionId,configSchema} from '../src/provider.ts';
 function setup(t:TestContext) {
   const home=mkdtempSync(path.join(os.tmpdir(),definitionId+'-profile-'));
   t.after(()=>rmSync(home,{recursive:true,force:true}));
-  const host=definitionId.endsWith('slack')?'example.slack.com':definitionId.endsWith('gitlab')?'gitlab.example.invalid':'console.firebase.google.com';
-  const config=configSchema.parse({hiveUrl:'http://127.0.0.1:23456',host,...(definitionId.endsWith('slack')?{cwd:home}:{})});
+  const config=configSchema.parse({hiveUrl:'http://127.0.0.1:23456',host:'gitlab.example.invalid'});
   return {home,config,request:{config,projectId:'project-a'}};
 }
 test('configure only saves a private local profile; repeated saves retain it and never start work',t=>{
@@ -51,7 +50,7 @@ test('wrong project destination is rejected before bot creation or a source read
   const f=setup(t);configureProfile(f.home,f.request);
   const gitlab=new GitLabBot(f.home,async()=>{throw new Error('NO REAL PROVIDER');}),calls:string[]=[];
   gitlab.request=async(route:string)=>{calls.push(route);if(route!=='/api/ui/snapshot')throw new Error('Unexpected write');return {agents:[],channels:[{id:'room',name:'Room',type:'private',projectId:'project-b',memberIds:[]}]};};
-  const source=definitionId.endsWith('gitlab')?'https://gitlab.example.invalid/demo/repo/-/merge_requests/7':definitionId.endsWith('slack')?'https://example.slack.com/archives/CFIXTURE/p1900000000123456':'https://console.firebase.google.com/project/demo-app/crashlytics/app/ios:com.example.app/issues';
+  const source='https://gitlab.example.invalid/demo/repo/-/merge_requests/7';
   try {await assert.rejects(gitlab.follow(source,'room'),/another/);assert.deepEqual(calls,['/api/ui/snapshot']);assert.equal(gitlab.subscriptions().length,0);}
   finally {gitlab.close();}
 });

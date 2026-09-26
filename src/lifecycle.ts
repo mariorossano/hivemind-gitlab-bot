@@ -16,22 +16,7 @@ export class HiveHttpError extends Error {
 
 /** Generic source-link protocol; no provider reads or monitor starts happen here. */
 export class SourceLifecycle {
-  constructor(readonly db: DatabaseSync, readonly request: Request, readonly label: string) {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      db.exec(`CREATE TABLE IF NOT EXISTS source_lifecycle (
-      subscription TEXT PRIMARY KEY, generation INTEGER NOT NULL DEFAULT 0,
-      desired TEXT NOT NULL DEFAULT 'unknown', applied TEXT NOT NULL DEFAULT 'pending',
-      paused_generation INTEGER NOT NULL DEFAULT 0, checked_at INTEGER NOT NULL DEFAULT 0,
-      error TEXT);
-      CREATE TABLE IF NOT EXISTS archive_recoveries (
-      event_id INTEGER PRIMARY KEY, subscription TEXT NOT NULL, reason TEXT NOT NULL,
-      generation INTEGER NOT NULL, recovered_at INTEGER NOT NULL);`);
-      const columns = db.prepare('PRAGMA table_info(events)').all();
-      if (!columns.some(c => c.name === 'pause_generation')) db.exec('ALTER TABLE events ADD COLUMN pause_generation INTEGER');
-      db.exec('COMMIT');
-    } catch (error) { db.exec('ROLLBACK'); throw error; }
-  }
+  constructor(readonly db: DatabaseSync, readonly request: Request, readonly label: string) {}
   state(id: string) { return this.db.prepare('SELECT * FROM source_lifecycle WHERE subscription=?').get(id); }
   headers(sub: Source) {
     const bot = this.db.prepare('SELECT token FROM bots WHERE id=?').get(sub.bot);
@@ -57,9 +42,8 @@ export class SourceLifecycle {
       if (link.generation < Number(previous.generation)) throw new Error('Source lifecycle generation regressed; reconcile server/profile backups');
       if (link.generation === previous.generation && previous.desired !== 'unknown' && previous.desired !== link.desired)
         throw new Error('Source lifecycle changed without a new generation');
-      this.db.prepare(`UPDATE source_lifecycle SET generation=?,desired=?,applied='pending',checked_at=?,error=NULL,
-        paused_generation=CASE WHEN ?='paused' THEN ? ELSE paused_generation END WHERE subscription=?`)
-        .run(link.generation, link.desired, Date.now(), link.desired, link.generation, sub.id);
+      this.db.prepare("UPDATE source_lifecycle SET generation=?,desired=?,applied='pending',checked_at=?,error=NULL WHERE subscription=?")
+        .run(link.generation, link.desired, Date.now(), sub.id);
       // Re-read local intent after each awaited request: unfollow/stop must win.
       const enabled = this.db.prepare('SELECT enabled FROM subscriptions WHERE id=?').get(sub.id)?.enabled === 1;
       const applied = link.desired === 'paused' ? 'paused' : !enabled ? 'disabled' : stopped ? 'stopped' : 'running';
@@ -94,23 +78,5 @@ export class SourceLifecycle {
         .run(Date.now(), error instanceof HiveHttpError ? error.message : 'Source lifecycle check failed; no read or delivery performed', sub.id);
       throw error;
     }
-  }
-  async recover(sub: Source, eventId: number, reason: string, signal?: AbortSignal) {
-    if (!reason.trim() || reason.length > 500) throw new Error('Supply a concise evidence-based reason confirming this event was blocked by archive');
-    const job = this.db.prepare('SELECT * FROM events WHERE id=? AND subscription=?').get(eventId, sub.id);
-    if (!job || job.state !== 'blocked' || job.error !== 'Hivemind HTTP 409')
-      throw new Error('Only an explicitly verified legacy archive HTTP 409 can be recovered');
-    const current = await this.sync(sub, signal, false);
-    const paused = Number(this.state(sub.id)?.paused_generation);
-    if (current.desired !== 'running' || !sub.enabled || !paused || current.generation <= paused)
-      throw new Error('Observe the archived source then explicitly reopen with resumeSources before recovery');
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      const changed = this.db.prepare("UPDATE events SET state='pending',next_at=0,error=NULL WHERE id=? AND subscription=? AND state='blocked' AND error='Hivemind HTTP 409'").run(eventId, sub.id);
-      if (!changed.changes) throw new Error('Event changed during recovery; inspect status');
-      this.db.prepare('INSERT INTO archive_recoveries VALUES (?,?,?,?,?)').run(eventId, sub.id, reason.trim(), current.generation, Date.now());
-      this.db.exec('COMMIT');
-    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
-    return { id: sub.id, eventId, recovered: true, delivered: false };
   }
 }

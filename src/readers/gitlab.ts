@@ -18,7 +18,7 @@ const mrSchema = z.object({
   has_conflicts: z.boolean().nullable().optional(),
   diverged_commits_count: z.number().int().nonnegative().nullable().optional(),
   rebase_in_progress: z.boolean().nullable().optional(), head_pipeline: pipelineSchema.nullish(),
-  // The legacy field is only validated if needed: never let it override a head pipeline.
+  // Validate the alternate pipeline value only when the head pipeline is absent.
   pipeline: z.unknown().optional(),
   labels: z.array(z.string()).optional(),
 });

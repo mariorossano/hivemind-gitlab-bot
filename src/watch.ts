@@ -14,23 +14,7 @@ type Route = {url:string;name:string;topic:string;channel:string|null;subscripti
 
 /** One explicit repository/rule per profile. Channels are keyed by immutable MR URL, never by title. */
 export class RepositoryWatch {
-  constructor(readonly gitlab:GitLabBot) {
-    gitlab.db.exec(`CREATE TABLE IF NOT EXISTS repository_watch (
-      id TEXT PRIMARY KEY,spec TEXT NOT NULL,subscription TEXT NOT NULL,project INTEGER NOT NULL,account INTEGER NOT NULL,
-      hive_project TEXT NOT NULL,brain TEXT NOT NULL,initialized INTEGER NOT NULL DEFAULT 0,started_at INTEGER NOT NULL DEFAULT 0,watermark INTEGER NOT NULL DEFAULT 0,
-      take_existing INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1,next_at INTEGER NOT NULL DEFAULT 0,last_error TEXT);
-      CREATE TABLE IF NOT EXISTS watch_seen (iid INTEGER PRIMARY KEY,matched INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS watch_label_events (id INTEGER PRIMARY KEY);
-      CREATE TABLE IF NOT EXISTS watch_jobs (url TEXT PRIMARY KEY,mr TEXT NOT NULL,detected_at INTEGER NOT NULL,state TEXT NOT NULL DEFAULT 'pending',error TEXT);
-      CREATE TABLE IF NOT EXISTS mr_routes (url TEXT PRIMARY KEY,name TEXT NOT NULL,topic TEXT NOT NULL,channel TEXT,subscription TEXT);
-      CREATE UNIQUE INDEX IF NOT EXISTS event_identity ON events(json_extract(event,'$.eventId'));`);
-    gitlab.db.exec('BEGIN IMMEDIATE');
-    try {
-      if(!gitlab.db.prepare('PRAGMA table_info(mr_routes)').all().some(c=>c.name==='origin'))
-        gitlab.db.exec("ALTER TABLE mr_routes ADD COLUMN origin TEXT NOT NULL DEFAULT 'discovery'");
-      gitlab.db.exec('COMMIT');
-    } catch(error){gitlab.db.exec('ROLLBACK');throw error;}
-  }
+  constructor(readonly gitlab:GitLabBot) {}
   current() {return this.gitlab.db.prepare('SELECT * FROM repository_watch').get() as Watch|undefined;}
   status() {
     const w=this.current();return w?{...w,spec:JSON.parse(w.spec),

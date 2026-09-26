@@ -38,7 +38,7 @@ Reuse only pins the existing channel/subscription IDs. It does not invite anyone
 
 Multiple retained destinations, incompatible/missing channels or rooms, and a collision with a separately created discovery channel produce a visible blocked job in `status.watch.jobs`, not a guessed destination or another channel. Permission failures remain blocked; transient read failures retain the same pending job. Operator reconciliation is required for blocked conflicts; no automatic rename/archive/unfollow is performed. Intentional manual follows into multiple channels remain supported, but discovery cannot choose between them automatically.
 
-Reloading this code requires stopping and starting only the bot monitor. Hivemind and agent sessions do not need a restart. The additive `mr_routes.origin` migration retains all previous routes as `discovery` and does not reset profiles or queues.
+Reloading this code requires stopping and starting only the bot monitor. Hivemind and agent sessions do not need a restart. Routes, queues and source lifecycle state persist across monitor restarts.
 
 Channels are private, containing Human, the selected brain and the reused bot. The URL-to-channel mapping and setup journal are persistent. Transient interruptions reconcile the same name/URL. A conflicting pre-existing channel, missing retained channel, wrong brain or explicit permission rejection does not cause adoption of an unrelated channel, creation of an alternative, or credential changes.
 
@@ -80,7 +80,7 @@ Primary API references: [MR listing](https://docs.gitlab.com/api/merge_requests/
 - `status` includes scope/account IDs, discovery checkpoint/error, channel setup jobs/routes, source lifecycle and delivery errors. `poll` exits nonzero when setup/delivery is incomplete. Pending jobs reconcile the same channel after transient failure; permission/identity conflicts stay blocked for inspection. Do not delete journals or retry denied actions with another identity.
 - Bot HTTP 429 admission throttles honor `Retry-After` with at most two immediate retries, using the same URL/body/event ID; afterward normal backoff applies. Abort remains effective during waits. This path never retries permission denials. Archive/generation guards remain active.
 
-## Deploy and rollback
+## Operations
 
 ### Local Hivemind authentication
 
@@ -94,7 +94,7 @@ restart, MR routing/delivery, archive/resume and daemon start/stop. Lifecycle te
 also exercise the core's native authentication gate. These isolated tests do not
 replace acceptance testing against your own configured GitLab host.
 
-Back up the **stopped** private profile before its first upgraded start. Additive schema changes preserve existing exact-URL subscriptions, bot identity, events and lifecycle; a reset is not required. Do not downgrade over a profile containing repository watches: old code cannot honor the new state. Preserve and reconcile new data instead of blindly restoring an older backup.
+Back up the **stopped** private profile before changing the installation. Profile schema checks happen before monitoring starts. An unsupported schema is a stop-and-inspect condition, not an instruction to reset the profile or discard queued events.
 
 Channel/contract provisioning uses the same local Human UI API already used for bot provisioning, under the explicit Human-configured rule. It does not use a brain token or accept imported content as authority. Install a core build with the composable Bots API before using this package; see [README.md](README.md). Existing brain conversations should reread the installed bot's `instructions` before using `watch`; no restart is needed merely to read those instructions.
 

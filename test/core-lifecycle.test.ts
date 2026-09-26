@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { GitLabBot, init } from '../src/runtime.ts';
 
-// Opt-in compatibility test: no production dependency on a sibling checkout.
+// Opt-in integration test: no production dependency on a sibling checkout.
 // Only imports source code; never opens that checkout's profiles or server.
 const source = process.env.HIVEMIND_TEST_SOURCE;
 test('R03 integration: real Hivemind HTTP API, versioned archive/resume, persisted gitlab and deduplicated bot events',
@@ -41,14 +41,16 @@ test('R03 integration: real Hivemind HTTP API, versioned archive/resume, persist
       hive.db.close(); rmSync(directory, { recursive: true, force: true });
     });
     server.listen(0, '127.0.0.1'); await once(server, 'listening');
-    const identity=hive.identity??hive,channels=hive.channels??hive;
-    const human = identity.getAgent('human'), brain = identity.join({ role: 'brain' }).agent;
+    const {identity,channels}=hive;
+    const human = identity.getAgent('human');
+    const project = hive.projects.createProject(human, { name: 'GitLab fixture', slug: 'gitlab-fixture' });
+    const brain = identity.join({ role: 'brain', project: project.slug }).agent;
     const channel = channels.createChannel(brain, { name: 'synthetic-mr', type: 'private', memberNames: [] });
     let request = 0;
     const room = (action: unknown) => hive.rooms.event(human, channel.id, {
       requestId: 'fixture-' + ++request, expectedRevision: hive.rooms.peek(channel.id)?.revision ?? 0, action,
     });
-    room({ type: 'configure', reason: 'Synthetic gitlab compatibility', contract: {
+    room({ type: 'configure', reason: 'Synthetic GitLab integration', contract: {
       mode: 'ongoing', purpose: 'Observe invented MR', rules: ['Fixture only'], limits: ['No provider connection'],
       coordinator: brain.name, participants: [], completion: ['Human ends fixture'], originTaskId: null,
     } });

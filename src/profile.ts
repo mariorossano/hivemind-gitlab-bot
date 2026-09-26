@@ -4,6 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod/v3';
 import {configSchema,profileIdentity,definitionId} from './provider.ts';
+import {assertStorage} from './storage.ts';
 
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const bindingSchema=z.object({version:z.literal(1),definitionId:z.string(),projectId:z.string().regex(/^[A-Za-z0-9_-]+$/),hiveUrl:z.string()}).strict();
@@ -39,6 +40,7 @@ export function configureProfile(home:string,raw:unknown) {
     if(existsSync(state)) {
       const db=new DatabaseSync(state,{readOnly:true});
       try {
+        assertStorage(db);
         const saved=db.prepare('SELECT value FROM meta WHERE key=?').get('identity') as any;
         if(saved&&saved.value!==hash(profileIdentity(config)))throw new Error('Settings change the identity of a retained source profile; use a new profile');
         if(db.prepare('SELECT 1 FROM bots WHERE project<>? LIMIT 1').get(input.projectId))throw new Error('Existing profile contains bots from a different project');

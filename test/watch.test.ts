@@ -373,8 +373,8 @@ test('R02 reuse: denied room lookup blocks without fallback; unavailable lookup 
   await f.gitlab.watch.cycle();assert.equal(f.gitlab.watch.status()!.jobs[1]!.state,'blocked');assert.equal(f.channels.length,3);
   f.reopen();await f.gitlab.watch.cycle();assert.equal(f.channels.length,3);assert.equal(f.gitlab.watch.status()!.jobs[1]!.state,'blocked');
 });
-test('R02 reuse: route migration preserves legacy discovery routes on reopen',async t=>{
+test('R02 reuse: current discovery routes survive reopen without duplicate channels',async t=>{
   const f=fixture(t);f.mrs.push(mr(1));await f.configure({initial:'follow'});await f.gitlab.cycle();
-  f.gitlab.db.exec('ALTER TABLE mr_routes DROP COLUMN origin');f.reopen();
+  f.reopen();
   assert.equal(f.gitlab.watch.status()!.routes[0]!.origin,'discovery');await f.gitlab.cycle();assert.equal(f.channels.length,2);
 });

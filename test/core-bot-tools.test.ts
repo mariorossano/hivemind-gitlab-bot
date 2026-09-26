@@ -30,7 +30,8 @@ test('external GitLab native tools configure, connect, follow, watch and stop on
     await core.shutdown(); hive.close(); rmSync(dir, { recursive: true, force: true });
   });
   const origin = `http://127.0.0.1:${await core.ready}`, app = createApp(hive);
-  const human = hive.identity.getAgent('human'), project = hive.projects.listProjects()[0]!;
+  const human = hive.identity.getAgent('human');
+  const project = hive.projects.createProject(human, { name: 'GitLab fixture', slug: 'gitlab-fixture' });
   const brain = hive.identity.join({ role: 'brain', project: project.slug });
   const channel = hive.channels.createChannel(human, { name: 'MR', type: 'private', project: project.slug, memberNames: [brain.agent.name] });
   const summary = hive.channels.createChannel(human, { name: 'Discovery', type: 'private', project: project.slug, memberNames: [brain.agent.name] });

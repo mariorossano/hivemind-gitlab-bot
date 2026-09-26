@@ -300,33 +300,14 @@ test('R03: unavailable/malformed/regressed lifecycle never falls back to blind r
   await f.gitlab.cycle(); assert.equal(reader.count(), 0);
   remote.generation = 'invalid'; await f.gitlab.cycle(); assert.equal(reader.count(), 0);
 });
-test('R03: ordinary 409 and permission 403 stay blocked across channel pause/resume', async t => {
+for (const status of [409, 403]) test(`ordinary HTTP ${status} stays blocked across channel pause/resume`, async t => {
   const f = await setup(t); await f.gitlab.follow(url, 'one'); const sub = f.gitlab.subscriptions()[0]!;
-  f.gitlab.apply(sub, snapshot()); f.fail(409); await f.gitlab.deliver();
+  f.gitlab.apply(sub, snapshot()); f.fail(status); await f.gitlab.deliver();
   const original = f.gitlab.db.prepare('SELECT event FROM events').get()!.event;
   f.fail(0); f.changeRoom('one', true); await f.gitlab.lifecycle.sync(sub);
   f.changeRoom('one', false, true); await f.gitlab.lifecycle.sync(sub); await f.gitlab.deliver();
   assert.equal(f.received.length, 0); assert.equal(f.gitlab.db.prepare('SELECT state FROM events').get()!.state, 'blocked');
   assert.equal(f.gitlab.db.prepare('SELECT event FROM events').get()!.event, original);
-  f.gitlab.db.exec("UPDATE events SET error='Hivemind HTTP 403'");
-  await assert.rejects(f.gitlab.lifecycle.recover(sub, 1, 'Verified fixture archive'), /Only/);
-});
-test('R03: legacy archive recovery requires specific evidence and an observed explicit resume; never starts monitoring', async t => {
-  const f = await setup(t); const link = await f.gitlab.follow(url, 'one'), sub = f.gitlab.subscriptions()[0]!;
-  f.gitlab.apply(sub, snapshot()); f.fail(409); await f.gitlab.deliver(); f.fail(0);
-  const original = f.gitlab.db.prepare('SELECT event FROM events').get()!.event;
-  await assert.rejects(f.gitlab.lifecycle.recover(sub, 1, 'Fixture archive verified'), /Observe/);
-  f.changeRoom('one', true); await f.gitlab.lifecycle.sync(sub);
-  f.changeRoom('one', false); await assert.rejects(f.gitlab.lifecycle.recover(sub, 1, 'Fixture archive verified'), /Observe/);
-  f.changeRoom('one', false, true);
-  const missing = await cli(f.home, ['recover-archived', '--id', link.id, '--event-id', '1', '--reason', 'Fixture archive verified']);
-  assert.notEqual(missing.code, 0);
-  const receipt = await cli(f.home, ['recover-archived', '--id', link.id, '--event-id', '1', '--reason', 'Fixture archive verified from original response', '--confirm-archive']);
-  assert.equal(receipt.code, 0, receipt.err); assert.equal(JSON.parse(receipt.out).delivered, false);
-  assert.equal(f.received.length, 0); assert.equal(f.gitlab.isRunning(), false);
-  assert.equal(f.gitlab.db.prepare('SELECT event FROM events').get()!.event, original);
-  assert.equal(f.gitlab.db.prepare('SELECT COUNT(*) n FROM archive_recoveries').get()!.n, 1);
-  await f.gitlab.deliver(); assert.equal(f.received.length, 1);
 });
 test('R03: unfollow and manual stop survive room resume and process restart', async t => {
   const reader = inventedReader(), f = await setup(t, reader.runner);

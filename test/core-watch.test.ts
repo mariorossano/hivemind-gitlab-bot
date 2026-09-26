@@ -23,8 +23,10 @@ test('R02 integration: actual CLI and authenticated full server, restart, rooms,
     const port=await core.ready;
     const anonymous=await fetch('http://127.0.0.1:'+port+'/api/ui/snapshot');
     assert.equal(anonymous.status,401);assert.equal(anonymous.headers.get('x-hivemind-session-required'),'1');await anonymous.body?.cancel();
-    const identity=hive.identity??hive,channels=hive.channels??hive;
-    const human=identity.getAgent('human'),brain=identity.join({role:'brain'}).agent;
+    const {identity,channels}=hive;
+    const human=identity.getAgent('human');
+    const project=hive.projects.createProject(human,{name:'GitLab fixture',slug:'gitlab-fixture'});
+    const brain=identity.join({role:'brain',project:project.slug}).agent;
     const summary=channels.createChannel(brain,{name:'fixture-review-inbox',type:'private'});
     const repo='https://gitlab.example.invalid/group/repo',data=path.join(dir,'fixture.json'),calls=path.join(dir,'calls.log');
     const executable=path.join(dir,'glab-fixture');

@@ -7,7 +7,7 @@ import { LocalHiveSession, hiveOrigin } from '../src/hive-session.ts';
 
 async function fixture(t: TestContext) {
   const calls: {route:string; method:string; cookie?:string; origin?:string; human?:string; authorization?:string; body:string}[]=[];
-  const hooks={ bootstrapDelay:0, bootstrapStatus:200, invalidCookie:false, legacy:false,
+  const hooks={ bootstrapDelay:0, bootstrapStatus:200, invalidCookie:false,
     before:undefined as ((req:IncomingMessage,res:ServerResponse)=>boolean)|undefined,
     after:undefined as ((req:IncomingMessage,res:ServerResponse)=>boolean)|undefined };
   let secret='a'.repeat(43),bootstraps=0,effects=0,base='',port=0;
@@ -28,7 +28,7 @@ async function fixture(t: TestContext) {
       res.setHeader('Set-Cookie',hooks.invalidCookie?'hivemind_human_1=invalid':`hivemind_human_${port}=${secret}; HttpOnly; SameSite=Strict; Path=/`);
       reply(200,{ok:true});return;
     }
-    if(req.url?.startsWith('/api/ui/')&&!hooks.legacy&&req.headers.cookie!==`hivemind_human_${port}=${secret}`) {
+    if(req.url?.startsWith('/api/ui/')&&req.headers.cookie!==`hivemind_human_${port}=${secret}`) {
       res.setHeader('X-Hivemind-Session-Required','1');reply(401,{error:'Human session required'});return;
     }
     if(req.url?.startsWith('/api/ui/'))assert.equal(req.headers.origin,base);
@@ -136,10 +136,8 @@ test('cancelled request is not sent; cancellation during bootstrap never replays
   while(!f.bootstraps)await delay(5);abort.abort();await rejected;
   await delay(100);assert.equal(f.effects,0);assert.equal(f.calls.length,2);
 });
-test('session state is not shared across bot clients or origins; legacy cores need no bootstrap',async t=>{
+test('session state is not shared across bot clients or origins',async t=>{
   const f=await fixture(t),other=await fixture(t);await consume(f.client.request('/api/ui/snapshot'));
   await consume(other.client.request('/api/ui/snapshot'));assert.equal(other.calls[0]!.cookie,undefined);
   await consume(new LocalHiveSession(f.base).request('/api/ui/snapshot'));assert.equal(f.bootstraps,2);
-  const legacy=await fixture(t);legacy.hooks.legacy=true;
-  assert.equal(await consume(legacy.client.request('/api/ui/snapshot')),200);assert.equal(legacy.bootstraps,0);
 });

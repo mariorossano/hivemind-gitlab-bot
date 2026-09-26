@@ -3,9 +3,8 @@
 Monitor GitLab merge requests from Hivemind: collect updates in a selected channel,
 or discover ready-to-review MRs and maintain one private channel for each.
 
-This repository is `hivemind-gitlab-bot`. The package, executable and persistent
-definition ID remain `hivemind-gitlab`; the repository name does not change existing
-profile identities or event IDs.
+Repository: `hivemind-gitlab-bot`. Package, executable and bot definition ID:
+`hivemind-gitlab`.
 
 GitLab is an **external bot** with its own repository, package and release cycle.
 Hivemind supplies the generic bot protocol and Bots UI; it does not contain or build
@@ -20,8 +19,7 @@ merge, push or rebase on GitLab.
 
 - Node.js 22.13 or later and npm.
 - A Hivemind build with the composable Bots API (`hivemind bots`, `bot_tools` and
-  `call_bot_tool`). This is a new, breaking integration; older Plugin APIs are not
-  supported. The accompanying core change must be installed before using this bot.
+  `call_bot_tool`).
 - A local `glab` executable authenticated to the intended GitLab host, with access
   to the repositories you want to observe. The bot only issues GET requests.
 - A Hivemind project and brain. Create the project explicitly; setup does not
@@ -109,28 +107,21 @@ is distinct from reopening only the room. Unfollow disables one subscription and
 cancels its undelivered observations; stop requests process termination. Neither is
 undone by a room resume. Already in-flight requests cannot be recalled.
 
-## Operator tools and migration
+## Operator tools and profile safety
 
 The executable is bin/hivemind-gitlab.mjs. In a source checkout it uses tsx;
 this package's own `npm run build` produces dist/cli.js for distribution. Installed
 packages run compiled JavaScript without tsx or a Hivemind source checkout.
-It retains local diagnostic
-and recovery commands. The direct CLI examples in REPOSITORY-WATCH.md are operator
-tools, not the brain-facing interface and not permission-denial recovery shortcuts.
+It provides local diagnostic and lifecycle commands. The direct CLI examples in
+REPOSITORY-WATCH.md are operator tools, not the brain-facing interface and not
+permission-denial recovery shortcuts.
 
-A retained profile can be explicitly bound, after registering this external
-manifest, with `hivemind bots bind hivemind-gitlab
---project PROJECT_SLUG --config-home /private/profile --home /hive`. Stop monitors
-and back up the hive/profile before migration. Reuse the existing bot identity;
-never reconnect a profile to another identity or erase its outbox to repair state.
-There is no separate Plugin abstraction: the implementation is `GitLabBot`.
-The bot manifest, project profile binding and diagnostic status use the stable
-`definitionId: "hivemind-gitlab"`. Event IDs and profile fingerprints keep that same
-stable value; pending observations are not renumbered or discarded.
-The old extension manifests, settings routes, registries and profile binding key
-are not supported. Before rollout, explicitly migrate retained
-`hivemind-project.json` bindings to `definitionId` offline after taking a backup;
-do not remove the binding or reinitialize the profile to bypass validation.
+Each profile belongs to one Hivemind project and GitLab host. Stop its monitor and
+back up the hive/profile before changing the installation. Never reconnect a profile
+to another identity or erase its outbox to repair state. The bot initializes empty
+databases with its current schema and rejects unsupported or incomplete schemas
+without converting or resetting them. Use the matching bot build to inspect such
+a profile; do not delete its data to force startup.
 
 Settings updates reject incompatible retained identities. Reconnecting rotates the
 Hivemind bot token and requires explicit Human confirmation; other clients using

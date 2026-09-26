@@ -2,7 +2,7 @@ import { z } from 'zod/v3';
 import { readGitLab } from './readers/gitlab.ts';
 import type { Runner } from './readers/process.ts';
 export const definitionId = 'hivemind-gitlab';
-export const usageNotice = 'Polling uses glab GET requests only; no Claude tokens are consumed.';
+export const usageNotice = 'Polling uses glab GET requests only; no model calls are made.';
 export const label = 'GitLab';
 export const configSchema = z.object({
   hiveUrl: z.string().url(), host: z.string().min(1).regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*(?::[0-9]+)?$/),
