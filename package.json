@@ -1,0 +1,47 @@
+{
+  "name": "hivemind-gitlab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "External GitLab bot for Hivemind with Publish and Tools capabilities",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mariorossano/hivemind-gitlab-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mariorossano/hivemind-gitlab-bot/issues"
+  },
+  "homepage": "https://github.com/mariorossano/hivemind-gitlab-bot#readme",
+  "type": "module",
+  "bin": {
+    "hivemind-gitlab": "./bin/hivemind-gitlab.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "BOT-TOOLS.md",
+    "hivemind-bot.json",
+    "settings.schema.json",
+    "README.md",
+    "REPOSITORY-WATCH.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test && npm run build",
+    "test:package": "node scripts/smoke-package.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "tsx": "4.23.13",
+    "@types/node": "24.13.4",
+    "typescript": "5.9.3"
+  }
+}

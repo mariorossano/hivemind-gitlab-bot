@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "kind": "bot",
+  "id": "hivemind-gitlab",
+  "name": "GitLab",
+  "capabilities": ["publish", "tools"],
+  "instructions": "BOT-TOOLS.md",
+  "settings": "settings.schema.json",
+  "command": "bin/hivemind-gitlab.mjs",
+  "tools": [
+    { "name": "status", "description": "Inspect local monitor state and section counts. Select a section for paginated details, following nextOffset. Long diagnostic fields are marked previews. Does not contact GitLab.", "effect": "read", "parameters": { "version": 1, "fields": [
+      { "key": "section", "label": "Section", "type": "string", "choices": ["summary", "subscriptions", "lifecycle", "deliveryErrors", "watchJobs", "watchRoutes", "watch"], "default": "summary" },
+      { "key": "offset", "label": "Offset", "type": "integer", "minimum": 0, "maximum": 1000000000, "default": 0 },
+      { "key": "limit", "label": "Page size", "type": "integer", "minimum": 1, "maximum": 50, "default": 20 }
+    ] } },
+    { "name": "start", "description": "Start this project's monitor. It reads GitLab and publishes observations to followed channels.", "effect": "configure", "parameters": { "version": 1, "fields": [] } },
+    { "name": "stop", "description": "Request that this project's monitor stop. Already in-flight operations may finish; check status.", "effect": "configure", "parameters": { "version": 1, "fields": [] } },
+    { "name": "follow", "description": "Configure observation of one exact MR in an existing channel. Requires a stopped monitor. Does not start polling or perform a review.", "effect": "configure", "parameters": { "version": 1, "fields": [
+      { "key": "url", "label": "Merge request URL", "type": "string", "required": true, "maxLength": 2048 },
+      { "key": "channel", "label": "Channel ID", "type": "string", "required": true, "maxLength": 200 },
+      { "key": "initial", "label": "Initial observation", "type": "string", "choices": ["snapshot", "baseline"], "default": "snapshot" }
+    ] } },
+    { "name": "watch", "description": "Configure repository discovery and one channel per matching MR. Requires a stopped monitor; does not start polling, assign reviews or write to GitLab.", "effect": "configure", "parameters": { "version": 1, "fields": [
+      { "key": "repository", "label": "Repository URL", "type": "string", "required": true, "maxLength": 2048 },
+      { "key": "channel", "label": "Summary channel ID", "type": "string", "required": true, "maxLength": 200 },
+      { "key": "brain", "label": "Brain name", "type": "string", "required": true, "maxLength": 80 },
+      { "key": "label", "label": "Exact label", "type": "string", "maxLength": 200 },
+      { "key": "authors", "label": "Authors (all, me or usernames)", "type": "strings", "default": ["all"], "minLength": 1 },
+      { "key": "excludeAuthors", "label": "Excluded authors", "type": "strings", "default": [], "minLength": 1 },
+      { "key": "initial", "label": "Existing MRs", "type": "string", "choices": ["summary", "follow"], "default": "summary" }
+    ] } },
+    { "name": "stop_watch", "description": "Pause one discovery watch. Existing MR subscriptions remain unchanged.", "effect": "configure", "parameters": { "version": 1, "fields": [{ "key": "id", "label": "Watch ID", "type": "string", "required": true, "maxLength": 200 }] } },
+    { "name": "resume_watch", "description": "Enable one discovery watch again. Does not start the monitor or resume archived source links.", "effect": "configure", "parameters": { "version": 1, "fields": [{ "key": "id", "label": "Watch ID", "type": "string", "required": true, "maxLength": 200 }] } },
+    { "name": "unfollow", "description": "Stop following an exact subscription ID and cancel its undelivered observations. Does not close the MR or archive the channel.", "effect": "configure", "parameters": { "version": 1, "fields": [
+      { "key": "id", "label": "Subscription ID", "type": "string", "required": true, "maxLength": 200 }
+    ] } }
+  ]
+}

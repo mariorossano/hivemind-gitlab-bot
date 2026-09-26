@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tgz
+*.log
+*.db
+*.db-*
+.env
+.env.*
+.runtime/
+config.local.json
