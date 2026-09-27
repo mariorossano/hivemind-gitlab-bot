@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +14,9 @@ try {
   await exec('npm', ['install', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund',
     '--prefix', dir, path.resolve(archive), ...(coreArchive ? [path.resolve(coreArchive)] : [])], { timeout: 120000 });
   const root = path.join(dir, 'node_modules/hivemind-gitlab');
+  assert.equal(JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).license, 'Apache-2.0');
+  assert.match(readFileSync(path.join(root, 'LICENSE'), 'utf8'), /Apache License[\s\S]+Version 2\.0/);
+  assert.match(readFileSync(path.join(root, 'NOTICE'), 'utf8'), /Copyright 2026 Mario Rossano/);
   assert.ok(existsSync(path.join(root, 'dist/cli.js')));
   assert.ok(!existsSync(path.join(root, 'src')), 'Bot package must not depend on source');
   assert.ok(!existsSync(path.join(dir, 'node_modules/tsx')), 'Installed bot must not require a TS loader');

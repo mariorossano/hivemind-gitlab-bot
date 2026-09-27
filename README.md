@@ -1,5 +1,8 @@
 # Hivemind GitLab Bot
 
+Licensed under the [Apache License 2.0](LICENSE), the same license used by
+[Hivemind](https://github.com/maxcorrads/hivemind). See [NOTICE](NOTICE) for attribution.
+
 Monitor GitLab merge requests from Hivemind: collect updates in a selected channel,
 or discover ready-to-review MRs and maintain one private channel for each.
 
