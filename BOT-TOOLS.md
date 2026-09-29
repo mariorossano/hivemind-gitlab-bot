@@ -1,8 +1,14 @@
 # GitLab bot: source monitoring
 
+This is the full operational guide, loaded on demand with `instructions`.
+Hivemind injects only [LAUNCH.md](LAUNCH.md) at startup. `instructions` reads
+this file without contacting GitLab or opening/creating a profile. Reading the
+guide does not authorize any operator CLI actions described in other documents.
+
 Use Hivemind's bot_tools to discover the GitLab bot and its current tool schemas.
-Invoke it through call_bot_tool with that botId, tool and arguments. Do not execute
-the bot's operator CLI or recreate a bot as a fallback when access is missing.
+Invoke it through call_bot_tool with that botId, tool and arguments. The CLI is
+only for reading this guide, never for bot operations or recreating a bot as a
+fallback when access is missing.
 Human manages identity, service settings and capabilities in the Bots panel.
 Configuration does not start monitoring; disabling access does not stop a running monitor.
 

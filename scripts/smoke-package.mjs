@@ -22,8 +22,14 @@ try {
   assert.ok(!existsSync(path.join(dir, 'node_modules/tsx')), 'Installed bot must not require a TS loader');
   assert.ok(existsSync(path.join(root, 'hivemind-bot.json')));
   const entry = path.join(root, 'bin/hivemind-gitlab.mjs');
+  const manifest = JSON.parse(readFileSync(path.join(root, 'hivemind-bot.json'), 'utf8'));
+  assert.equal(manifest.instructions, 'LAUNCH.md');
+  assert.match(readFileSync(path.join(root, manifest.instructions), 'utf8'), /\{\{command\}\} instructions/);
   assert.match((await exec(process.execPath, [entry, '--help'], { timeout: 5000 })).stdout, /hivemind-gitlab/);
   const profile = path.join(dir, 'profile');
+  const guide = (await exec(process.execPath, [entry, '--home', profile, 'instructions'], { timeout: 5000 })).stdout;
+  assert.equal(guide.trim(), readFileSync(path.join(root, 'BOT-TOOLS.md'), 'utf8').trim());
+  assert.ok(!existsSync(profile), 'Reading documentation must not create a profile');
   const command = async (...args) => JSON.parse((await exec(process.execPath, [entry, ...args, '--home', profile],
     { timeout: 25000, killSignal: 'SIGKILL' })).stdout);
   await command('init', '--hive-url', 'http://127.0.0.1:1', '--host', 'gitlab.example.invalid');

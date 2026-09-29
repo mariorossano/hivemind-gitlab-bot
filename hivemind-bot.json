@@ -4,7 +4,7 @@
   "id": "hivemind-gitlab",
   "name": "GitLab",
   "capabilities": ["publish", "tools"],
-  "instructions": "BOT-TOOLS.md",
+  "instructions": "LAUNCH.md",
   "settings": "settings.schema.json",
   "command": "bin/hivemind-gitlab.mjs",
   "tools": [

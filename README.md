@@ -68,7 +68,12 @@ Inviting the bot alone does not select a repository or MR. A follow/watch rule
 binds the source to its destination. One bot can publish to multiple channels;
 Hivemind checks its project, capability and channel membership on every delivery.
 
-Brains use `bot_tools` and `call_bot_tool`; see [BOT-TOOLS.md](BOT-TOOLS.md).
+Brains use `bot_tools` and `call_bot_tool`. Hivemind injects the compact
+[LAUNCH.md](LAUNCH.md), not the full manual. Before using the bot, the brain reads
+[BOT-TOOLS.md](BOT-TOOLS.md) through the profile-scoped `instructions` command in
+that prompt. This only reads packaged documentation: no GitLab access, profile
+creation or monitor start. Both files ship in the package. Existing brain sessions
+are not silently updated; use a refreshed launch prompt or supply the new guide.
 Available functions are status, start, stop, follow, unfollow, watch, stop_watch and
 resume_watch. Follow/watch require a stopped monitor and never auto-start it.
 Human can also check/start/stop the monitor from Manage bot.
