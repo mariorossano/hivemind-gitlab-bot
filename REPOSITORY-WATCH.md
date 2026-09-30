@@ -44,7 +44,7 @@ Channels are private, containing Human, the selected brain and the reused bot. T
 
 ## Work in the MR channel
 
-New channels have an **ongoing room contract**: collect updates, but do not start reviews or analysis automatically. Existing contracts are never overwritten by the bot.
+New channels have a persistent room contract: collect updates, but do not start reviews or analysis automatically. Hivemind 0.8+ uses `instructions`, `coordinator` and participant names; older cores use the structured ongoing contract. The bot selects the schema from the room view before writing, without retrying a denied mutation. Existing contracts are never overwritten by the bot.
 
 Human can write a one-off request, such as “Review the current MR and report here, without publishing on GitLab.” The brain reads the room contract and current MR/head, organizes the review in a thread/task, and returns results there. Human can instead say “From now on, analyze each new comment and propose a reply here.” The brain records this explicitly scoped instruction in the room contract using `get_room`/`room_event` and confirms it; it must not depend solely on native conversation memory. Updating a rule for one MR does not update all future rooms.
 
@@ -76,7 +76,7 @@ Primary API references: [MR listing](https://docs.gitlab.com/api/merge_requests/
 - `stop-watch --id WATCH_ID` stops discovery only; linked MR monitors remain independent. `resume-watch --id WATCH_ID` enables the same rule without starting the process.
 - `stop` / `start` control the whole profile. `unfollow --id SUB_ID` disables one source and cancels its unsent observations; rediscovery, `take-existing` and room reopen never undo it.
 - Archiving a contracted summary channel pauses discovery. Archiving one MR room pauses its detail reads/deliveries, not other MR channels. Repository-wide discovery may still see its metadata in the shared list, but never resumes its source or reopens its room.
-- Source resume is explicit. Room-only reopen leaves sources paused. Current core requires another authorized archive/reopen to resume sources after a room-only reopen; the bot never performs this workaround automatically.
+- In Hivemind 0.8+, explicit unarchive requests source resume; archive also cancels open channel tasks. On older cores, room-only reopen leaves sources paused and `resumeSources` must be explicitly requested. Never archive/reopen as a queue-repair workaround. Neither unarchive nor source resume starts a stopped monitor or undoes unfollow.
 - `status` includes scope/account IDs, discovery checkpoint/error, channel setup jobs/routes, source lifecycle and delivery errors. `poll` exits nonzero when setup/delivery is incomplete. Pending jobs reconcile the same channel after transient failure; permission/identity conflicts stay blocked for inspection. Do not delete journals or retry denied actions with another identity.
 - Bot HTTP 429 admission throttles honor `Retry-After` with at most two immediate retries, using the same URL/body/event ID; afterward normal backoff applies. Abort remains effective during waits. This path never retries permission denials. Archive/generation guards remain active.
 

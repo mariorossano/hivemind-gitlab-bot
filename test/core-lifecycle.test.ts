@@ -50,7 +50,12 @@ test('R03 integration: real Hivemind HTTP API, versioned archive/resume, persist
     const room = (action: unknown) => hive.rooms.event(human, channel.id, {
       requestId: 'fixture-' + ++request, expectedRevision: hive.rooms.peek(channel.id)?.revision ?? 0, action,
     });
-    room({ type: 'configure', reason: 'Synthetic GitLab integration', contract: {
+    const simple=typeof hive.rooms.view(human,channel.id).archived==='boolean';
+    const reopen=(reason:string)=>({type:'reopen',reason,...(simple?{}:{resumeSources:true})});
+    room({ type: 'configure', reason: 'Synthetic GitLab integration', contract: simple ? {
+      instructions:'Observe invented MR. Fixture only. No provider connection. Human ends fixture.',
+      coordinator:brain.name,participants:[],
+    } : {
       mode: 'ongoing', purpose: 'Observe invented MR', rules: ['Fixture only'], limits: ['No provider connection'],
       coordinator: brain.name, participants: [], completion: ['Human ends fixture'], originTaskId: null,
     } });
@@ -69,11 +74,12 @@ test('R03 integration: real Hivemind HTTP API, versioned archive/resume, persist
     assert.equal(hive.rooms.view(human, channel.id).links[0].observed, 'paused');
     assert.equal(hive.db.prepare('SELECT COUNT(*) n FROM bot_events').get().n, 0);
     gitlab.close(); gitlab = new GitLabBot(home, runner);
-    room({ type: 'reopen', resumeSources: false, reason: 'Room only' });
-    await gitlab.cycle(); assert.equal(reads, 0);
-    // The current core cannot reopen an already active room: archive it again first.
-    room({ type: 'archive', reason: 'Prepare explicit source resume' });
-    room({ type: 'reopen', resumeSources: true, reason: 'Explicit source resume' });
+    if(!simple) {
+      room({ type: 'reopen', resumeSources: false, reason: 'Room only' });
+      await gitlab.cycle(); assert.equal(reads, 0);
+      room({ type: 'archive', reason: 'Prepare explicit source resume' });
+    }
+    room(reopen('Explicit source resume'));
     await gitlab.deliver(); await gitlab.deliver();
     assert.equal(hive.db.prepare('SELECT COUNT(*) n FROM bot_events').get().n, 1);
     assert.equal(gitlab.db.prepare('SELECT event FROM events').get()!.event, original);
@@ -84,7 +90,7 @@ test('R03 integration: real Hivemind HTTP API, versioned archive/resume, persist
     await gitlab.deliver();
     assert.equal(gitlab.db.prepare('SELECT state FROM events WHERE id=2').get()!.state, 'paused');
     assert.equal(hive.db.prepare('SELECT COUNT(*) n FROM bot_events').get().n, 1);
-    room({ type: 'reopen', resumeSources: true, reason: 'Resume raced event' });
+    room(reopen('Resume raced event'));
     await gitlab.lifecycle.sync(sub); await gitlab.deliver();
     assert.equal(hive.db.prepare('SELECT COUNT(*) n FROM bot_events').get().n, 2);
     gitlab.unfollow(sub.id); await gitlab.reportStopped();

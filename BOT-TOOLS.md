@@ -74,8 +74,10 @@ authors, excludeAuthors and initial. Resolve the requested selections before cal
 ## Lifecycle and interpretation
 
 Archiving a contracted summary room pauses discovery; archiving an MR room pauses
-its source links and preserves queued observations. Reopening the room alone does
-not resume sources. Use explicit resumeSources only when Human requests it.
+its source links and preserves queued observations. In Hivemind 0.8+, unarchive
+also requests source resume and archive cancels open channel tasks. Older cores
+require explicit resumeSources; reopening only the room leaves sources paused.
+Use the installed core's schema, and change lifecycle only on Human instruction.
 A room operation affects collaborative work too: do not archive/reopen as a queue
 repair trick. Channel resume never undoes unfollow or starts a stopped monitor.
 

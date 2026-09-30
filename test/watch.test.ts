@@ -18,7 +18,7 @@ function mr(iid:number, labels:string[]=['ready for review'], authorId=8) {
 function note(id:number,body='Invented comment',delta=-60000) {
   return {id,body,author:{id:8,name:'Invented'},system:false,created_at:stamp(delta),updated_at:stamp(delta),resolvable:true,resolved:false};
 }
-function fixture(t:TestContext) {
+function fixture(t:TestContext,simpleContracts=false) {
   const home=mkdtempSync(path.join(os.tmpdir(),'gitlab-watch-test-'));
   init(home,{hiveUrl:'http://127.0.0.1:19731',host:'gitlab.example.invalid'});
   const mrs:any[]=[], notes=new Map<number,any[]>(), labels=new Map<number,any[]>();
@@ -68,8 +68,13 @@ function fixture(t:TestContext) {
     const channel=channels.find(c=>c.id===match[1]);assert.ok(channel);
     if(match[2]==='invite'){for(const name of body.names)channel.memberIds.push(agents.find(a=>a.name===name)!.id);return {channel};}
     if(match[2]==='room') {
-      if(options.method==='POST'){assert.equal(body.action.type,'configure');assert.equal(body.expectedRevision,0);rooms.set(channel.id,{revision:1,state:'active',contract:body.action.contract});}
-      return {room:rooms.get(channel.id)??null};
+      if(options.method==='POST'){
+        assert.equal(body.action.type,'configure');assert.equal(body.expectedRevision,0);
+        if(simpleContracts)assert.deepEqual(Object.keys(body.action.contract).sort(),['coordinator','instructions','participants']);
+        else assert.equal(body.action.contract.mode,'ongoing');
+        rooms.set(channel.id,{revision:1,state:'active',contract:body.action.contract});
+      }
+      return {room:rooms.get(channel.id)??null,...(simpleContracts?{archived:false}:{})};
     }
     const headers=new Headers(options.headers),bot=agents.find(a=>'Bearer synthetic-only-'+a.id===headers.get('Authorization'));
     assert.ok(bot && channel.memberIds.includes(bot.id));
@@ -114,6 +119,30 @@ test('R02: default initial summary once, new MR gets one private room, no histor
   assert.equal([...f.messages.values()].filter(m=>m.body.includes('Invented comment')).length,0);
   assert.ok(!f.hiveCalls.some(c=>/task|agent\//.test(c)));
   const count=f.messages.size;f.reopen();await f.gitlab.cycle();assert.equal(f.channels.length,2);assert.equal(f.messages.size,count);
+});
+test('0.8: new MR uses a simple contract and preserves Human instructions across restart',async t=>{
+  const f=fixture(t,true);await f.configure();await f.gitlab.cycle();
+  f.mrs.push(mr(1));await f.gitlab.cycle();
+  assert.equal(f.gitlab.watch.status()!.jobs[0]!.state,'ready');
+  const room=f.rooms.get(f.channels[1].id);
+  assert.match(room.contract.instructions,/do not start a review/);
+  assert.match(room.contract.instructions,/No automatic source replies/);
+  assert.equal(room.contract.coordinator,'Brain');assert.deepEqual(room.contract.participants,[]);
+  room.contract.instructions='Human instructions: preserve this custom workflow.';
+  f.reopen();await f.gitlab.cycle();
+  assert.equal(f.channels.length,2);assert.equal(room.contract.instructions,'Human instructions: preserve this custom workflow.');
+  assert.ok(!f.hiveCalls.some(c=>/task|agent\//.test(c)));
+});
+test('0.8: reuse accepts a migrated simple contract without rewriting it',async t=>{
+  const f=fixture(t,true);const source=mr(1);f.mrs.push(source);await f.configure();await f.gitlab.cycle();
+  const channel=manualChannel(f);
+  f.rooms.get(channel.id).contract={instructions:'Human-selected reviewer. No automatic work.',coordinator:'Brain',participants:[]};
+  const linked=await f.gitlab.follow(source.web_url,channel.id);
+  const before=structuredClone(f.rooms.get(channel.id));
+  source.labels=[];await f.gitlab.watch.cycle();source.labels=['ready for review'];await f.gitlab.watch.cycle();
+  const route=f.gitlab.watch.status()!.routes[0] as any;
+  assert.equal(route.channel,channel.id);assert.equal(route.subscription,linked.id);assert.equal(route.origin,'existing');
+  assert.deepEqual(f.rooms.get(channel.id),before);assert.equal(f.channels.length,2);
 });
 test('R02: explicit initial follow and take-existing create current channels without replaying history',async t=>{
   const f=fixture(t);f.mrs.push(mr(1));f.notes.set(1,[note(1)]);const w=await f.configure();await f.gitlab.cycle();

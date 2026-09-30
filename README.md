@@ -110,8 +110,9 @@ Health events distinguish pending/unknown checks from healthy results and valida
 pipeline SHA against the current head. See [REPOSITORY-WATCH.md](REPOSITORY-WATCH.md)
 for filters, event coverage, reconciliation and source lifecycle.
 
-Channel archive pauses its source links and retains queues. Explicit source resume
-is distinct from reopening only the room. Unfollow disables one subscription and
+Channel archive pauses its source links and retains queues. On Hivemind 0.8+,
+unarchive requests source resume; on older cores it requires explicit `resumeSources`.
+Unfollow disables one subscription and
 cancels its undelivered observations; stop requests process termination. Neither is
 undone by a room resume. Already in-flight requests cannot be recalled.
 
