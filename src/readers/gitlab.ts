@@ -2,6 +2,7 @@ import { z } from "zod/v3";
 import { excerpt, type GitLabSource, type Observation, type Snapshot } from "./config.ts";
 import { runCommand, type Runner } from "./process.ts";
 import { WatchReader } from '../watch-reader.ts';
+import { mrHeading } from '../mr-context.ts';
 
 const authorSchema = z.object({ name: z.string(), username: z.string().optional() });
 const date = z.string().refine((value) => Number.isFinite(Date.parse(value)), "Invalid date");
@@ -65,7 +66,7 @@ function healthObservation(mr: z.infer<typeof mrSchema>, url: string, hostname: 
   return {
     key: 'health', value, url, occurredAt: Date.now(),
     body: excerpt([
-      `MR !${mr.iid} · merge health (observed now)`,
+      `${mrHeading(mr.iid,mr.title)} · merge health (observed now)`,
       `Target: ${mr.target_branch}`,
       `Merge status: ${mergeStatus ?? 'unknown'}`,
       `Conflicts: ${conflictText}`,
@@ -92,7 +93,7 @@ export async function readGitLab(source: GitLabSource, cwd: string, runner: Runn
   const observations: Observation[] = [{ key: "mr", value: {
     title: mr.title, description: mr.description ?? "", state: mr.state, sha: mr.sha ?? null,
     draft: mr.draft ?? false, source: mr.source_branch, target: mr.target_branch, ...(mr.labels?{labels:[...mr.labels].sort()}:{}),
-  }, body: excerpt(`MR !${mr.iid}: ${mr.title}\nState: ${mr.state}${mr.draft ? " · draft" : ""}\n${mr.source_branch} → ${mr.target_branch}\nHead: ${mr.sha ?? "unavailable"}\n${mr.labels?'Labels: '+[...mr.labels].sort().join(', ')+'\n':''}\n${mr.description ?? ""}`),
+  }, body: excerpt(`${mrHeading(mr.iid,mr.title)}\nState: ${mr.state}${mr.draft ? " · draft" : ""}\n${mr.source_branch} → ${mr.target_branch}\nHead: ${mr.sha ?? "unavailable"}\n${mr.labels?'Labels: '+[...mr.labels].sort().join(', ')+'\n':''}\n${mr.description ?? ""}`),
     author: mr.author.name, url, occurredAt: Date.parse(mr.updated_at) }, healthObservation(mr, url, source.hostname)];
   const seenDiscussions = new Set<string>(), seenNotes = new Set<number>();
   const perPage = 100;
@@ -110,7 +111,7 @@ export async function readGitLab(source: GitLabSource, cwd: string, runner: Runn
         const location = note.position ? `${note.position.new_path ?? note.position.old_path ?? "diff"}:${note.position.new_line ?? note.position.old_line ?? ""}` : null;
         observations.push({ key: `note:${note.id}`, value: { body: note.body, discussionId: discussion.id, ...(events?{createdAt:Date.parse(note.created_at)}:{}),
           resolved: note.resolved ?? false, resolvable: note.resolvable ?? false, position: note.position ?? null },
-          body: excerpt(`${index === 0 ? "Comment" : "Reply"} on MR !${mr.iid} · discussion ${discussion.id}${location ? ` · ${location}` : ""}${note.resolvable ? ` · ${note.resolved ? "resolved" : "unresolved"}` : ""}\n\n${note.body}`),
+          body: excerpt(`${index === 0 ? "Comment" : "Reply"} on ${mrHeading(mr.iid,mr.title)}\nDiscussion ${discussion.id}${location ? ` · ${location}` : ""}${note.resolvable ? ` · ${note.resolved ? "resolved" : "unresolved"}` : ""}\n\n${note.body}`),
           author: note.author.name, url: `${url.split("#")[0]}#note_${note.id}`, occurredAt: Date.parse(note.updated_at) });
       }
     }
@@ -121,7 +122,7 @@ export async function readGitLab(source: GitLabSource, cwd: string, runner: Runn
     const reader=new WatchReader(source,cwd,runner,async()=>{},signal);
     for(const event of await reader.labelEvents(mr.project_id,mr.iid))observations.push({
       key:'label-event:'+event.id,value:event,url,occurredAt:Date.parse(event.created_at),
-      body:`MR !${mr.iid} · label ${event.action==='add'?'aggiunta':'rimossa'}: ${event.label?.name ?? '(eliminata in GitLab)'}\n${url}`,
+      body:`${mrHeading(mr.iid,mr.title)} · label ${event.action==='add'?'aggiunta':'rimossa'}: ${event.label?.name ?? '(eliminata in GitLab)'}\n${url}`,
     });
   }
   if(events?.includes('approval')) {
@@ -130,7 +131,7 @@ export async function readGitLab(source: GitLabSource, cwd: string, runner: Runn
     if(approved.iid!==mr.iid || approved.project_id!==mr.project_id)throw new Error('Approval response belongs to another MR');
     const users=approved.approved_by.map(a=>a.user).sort((a,b)=>a.id-b.id);
     observations.push({key:'approval',value:{approved:approved.approved??null,users},url,
-      body:`MR !${mr.iid} · approvazioni correnti: ${users.map(u=>'@'+u.username).join(', ') || 'nessuna'}\n`+
+      body:`${mrHeading(mr.iid,mr.title)} · approvazioni correnti: ${users.map(u=>'@'+u.username).join(', ') || 'nessuna'}\n`+
         `Requisiti approvazione soddisfatti secondo GitLab: ${approved.approved===undefined?'non indicato':approved.approved?'sì':'no'}.\n${url}`});
   }
   // No removal is inferred from absence: permissions and concurrently changing pages are not tombstones.

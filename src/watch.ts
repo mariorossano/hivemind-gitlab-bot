@@ -3,6 +3,7 @@ import type { GitLabBot } from './runtime.ts';
 import { HiveHttpError, LifecycleDeferred } from './lifecycle.ts';
 import { assertProject } from './profile.ts';
 import { excerpt } from './readers/config.ts';
+import { mrChannelName, mrTitle } from './mr-context.ts';
 import { WatchReader, watchSchema, repositoryPath, authorMatches, type WatchSpec, type Candidate } from './watch-reader.ts';
 
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0,24);
@@ -190,8 +191,9 @@ export class RepositoryWatch {
         !['human',w.brain,linked.bot].every(id=>channel.memberIds.includes(id)) || !bot ||
         this.gitlab.subscriptions().some(s=>s.channel===channel.id && (s.source_kind!=='mr' || s.url!==job.url)))
       throw new ProvisionConflict('Existing MR link needs a dedicated private channel in this project with Human, configured brain and bot; no duplicate created');
-    const canonicalName=`mr-${w.project}-${JSON.parse(job.mr).iid}`;
-    if(snapshot.channels.some((c:any)=>c.projectId===w.hive_project && c.name===canonicalName && c.id!==channel.id))
+    const mr:Candidate=JSON.parse(job.mr);
+    const canonicalNames=new Set([`mr-${w.project}-${mr.iid}`,mrChannelName(w.project,mr.iid,mr.title),route?.name]);
+    if(snapshot.channels.some((c:any)=>c.projectId===w.hive_project && canonicalNames.has(c.name) && c.id!==channel.id))
       throw new ProvisionConflict('Both a manual and a discovery-named MR channel exist; reconcile them explicitly, no duplicate created');
     const view=await this.gitlab.request('/api/ui/channels/'+encodeURIComponent(channel.id)+'/room',{},signal);
     const contract=view.room?.contract;
@@ -219,19 +221,32 @@ export class RepositoryWatch {
   }
   async provision(w:Watch,spec:WatchSpec,job:Job,guard:()=>Promise<void>,signal?:AbortSignal) {
     const mr:Candidate=JSON.parse(job.mr);
-    const name=`mr-${w.project}-${mr.iid}`;
-    const topic=`GitLab MR: ${job.url}\nManaged source: ${hash([w.hive_project,job.url])}\nRaccolta aggiornamenti. Review e analisi solo su istruzione Human; nessuna pubblicazione automatica.`;
+    const legacyName=`mr-${w.project}-${mr.iid}`;
+    const legacyTopic=`GitLab MR: ${job.url}\nManaged source: ${hash([w.hive_project,job.url])}\nRaccolta aggiornamenti. Review e analisi solo su istruzione Human; nessuna pubblicazione automatica.`;
+    const name=mrChannelName(w.project,mr.iid,mr.title);
+    const context=`\nGitLab MR: ${job.url}\nManaged source: ${hash([w.hive_project,job.url])}\nTitle at enrollment. Collect updates only; reviews and analysis require Human instruction.`;
+    if(context.length>=4000)throw new ProvisionConflict('MR source URL is too long for a channel topic; no channel created');
+    const topic=mrTitle(mr.title,4000-context.length)+context;
     const snapshot=await this.gitlab.request('/api/ui/snapshot',{},signal);
     const brain=snapshot.agents.find((a:any)=>a.id===w.brain && a.projectId===w.hive_project && a.role==='brain');
     if(!brain)throw new ProvisionConflict('Configured brain unavailable; no automatic replacement');
     const saved=this.gitlab.db.prepare('SELECT * FROM mr_routes WHERE url=?').get(job.url) as Route|undefined;
     if(await this.reuseExisting(w,job,saved,snapshot,guard,signal))return;
-    this.gitlab.db.prepare('INSERT OR IGNORE INTO mr_routes(url,name,topic) VALUES (?,?,?)').run(job.url,name,topic);
+    // Old names and interrupted pre-upgrade setups stay on the same route. Never
+    // bypass a collision by creating the new name alongside the legacy channel.
+    const legacy=snapshot.channels.find((c:any)=>c.projectId===w.hive_project && c.name===legacyName);
+    if(!saved && legacy && snapshot.channels.some((c:any)=>c.projectId===w.hive_project && c.name===name && c.id!==legacy.id))
+      throw new ProvisionConflict('Both legacy and descriptive MR channels exist; reconcile them explicitly, no duplicate created');
+    this.gitlab.db.prepare('INSERT OR IGNORE INTO mr_routes(url,name,topic) VALUES (?,?,?)')
+      .run(job.url,legacy?legacyName:name,legacy?legacyTopic:topic);
     const route=this.gitlab.db.prepare('SELECT * FROM mr_routes WHERE url=?').get(job.url) as Route;
-    let channel=route.channel?snapshot.channels.find((c:any)=>c.id===route.channel):snapshot.channels.find((c:any)=>c.projectId===w.hive_project && c.name===name);
+    if(!route.channel && snapshot.channels.some((c:any)=>c.projectId===w.hive_project && c.name!==route.name &&
+        (c.name===legacyName || c.name===name)))
+      throw new ProvisionConflict('Another MR channel appeared during setup; reconcile it explicitly, no duplicate created');
+    let channel=route.channel?snapshot.channels.find((c:any)=>c.id===route.channel):snapshot.channels.find((c:any)=>c.projectId===w.hive_project && c.name===route.name);
     if(route.channel && !channel)throw new ProvisionConflict('Linked channel missing; history is not recreated automatically');
     const validate=(c:any)=>{
-      if(!c || c.projectId!==w.hive_project || c.type!=='private' || c.name!==name || c.topic!==topic || !c.memberIds.includes(brain.id))
+      if(!c || c.projectId!==w.hive_project || c.type!=='private' || c.name!==route.name || c.topic!==route.topic || !c.memberIds.includes(brain.id))
         throw new ProvisionConflict('MR channel name/identity/membership conflict; inspect it without creating a duplicate');
     };
     if(!channel) {
@@ -239,7 +254,7 @@ export class RepositoryWatch {
       if(!project || typeof project.slug!=='string' || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(project.slug))
         throw new ProvisionConflict('Configured Hivemind project unavailable; no channel created');
       await guard();
-      const result=await this.gitlab.request('/api/ui/channels',post({name,type:'private',topic,project:project.slug,memberNames:[brain.name]}),signal);
+      const result=await this.gitlab.request('/api/ui/channels',post({name:route.name,type:'private',topic:route.topic,project:project.slug,memberNames:[brain.name]}),signal);
       channel=result.channel;
     }
     validate(channel);

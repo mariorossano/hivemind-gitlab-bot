@@ -6,6 +6,8 @@ import path from 'node:path';
 import { GitLabBot, init } from '../src/runtime.ts';
 import { WatchReader, watchSchema, repositoryPath, eventTypes } from '../src/watch-reader.ts';
 import { HiveHttpError } from '../src/lifecycle.ts';
+import { createHash } from 'node:crypto';
+import { mrChannelName } from '../src/mr-context.ts';
 
 const repository='https://gitlab.example.invalid/group/repo';
 const stamp=(delta=0)=>new Date(Date.now()+delta).toISOString();
@@ -158,12 +160,12 @@ test('R02: configurable authors, me means author ID and exclusion wins',async t=
   const f=fixture(t);await f.configure({authors:['all'],excludeAuthors:['me'],initial:'follow'});
   f.mrs.push(mr(1,undefined,7),mr(2,undefined,8),{...mr(3,undefined,9),author:{id:9,username:'operator',name:'Same username is not me'}});
   await f.gitlab.cycle();assert.equal(f.channels.length,3);
-  assert.ok(!f.channels.some(c=>c.name==='mr-42-1'));assert.ok(f.channels.some(c=>c.name==='mr-42-3'));
+  assert.ok(!f.channels.some(c=>c.name===mrChannelName(42,1,'Fixture 1')));assert.ok(f.channels.some(c=>c.name===mrChannelName(42,3,'Fixture 3')));
 });
 test('R02: named author selection excludes others before label history reads',async t=>{
   const f=fixture(t);await f.configure({authors:['reviewer'],initial:'follow'});
   f.mrs.push(mr(1,undefined,7),mr(2));await f.gitlab.cycle();assert.equal(f.channels.length,2);
-  assert.ok(f.channels.some(c=>c.name==='mr-42-2'));
+  assert.ok(f.channels.some(c=>c.name===mrChannelName(42,2,'Fixture 2')));
 });
 test('R02: label added later, removed/readded and Draft are separate; stable channel survives title changes',async t=>{
   const f=fixture(t);const source=mr(1,[]);f.mrs.push(source);await f.configure();await f.gitlab.cycle();
@@ -406,4 +408,91 @@ test('R02 reuse: current discovery routes survive reopen without duplicate chann
   const f=fixture(t);f.mrs.push(mr(1));await f.configure({initial:'follow'});await f.gitlab.cycle();
   f.reopen();
   assert.equal(f.gitlab.watch.status()!.routes[0]!.origin,'discovery');await f.gitlab.cycle();assert.equal(f.channels.length,2);
+});
+
+test('descriptive channel name and topic are pinned through a title edit, lost response and restart',async t=>{
+  const f=fixture(t,true),source={...mr(1),title:'feat(APP-123): adopt scene lifecycle'};
+  await f.configure();await f.gitlab.cycle();f.mrs.push(source);f.hooks.loseCreate=true;await f.gitlab.cycle();
+  const channel=structuredClone(f.channels[1]);
+  assert.equal(channel.name,'mr-1-adopt-scene-lifecycle-p42');
+  assert.ok(channel.topic.startsWith(source.title+'\nGitLab MR: '+source.web_url));
+  assert.equal(f.gitlab.watch.status()!.jobs[0]!.state,'pending');
+  source.title='fix(APP-123): renamed after channel creation';
+  // Even a refreshed pending-job payload cannot replace its recorded name/topic.
+  f.gitlab.db.prepare('UPDATE watch_jobs SET mr=? WHERE url=?').run(JSON.stringify(source),source.web_url);
+  f.reopen();await f.gitlab.cycle();
+  assert.equal(f.gitlab.watch.status()!.jobs[0]!.state,'ready');assert.equal(f.channels.length,2);
+  assert.equal(f.channels[1].id,channel.id);assert.equal(f.channels[1].name,channel.name);assert.equal(f.channels[1].topic,channel.topic);
+  assert.equal(f.gitlab.subscriptions().filter(s=>s.source_kind==='mr').length,1);
+});
+
+test('long titles keep topics bounded without losing the canonical MR link or source marker',async t=>{
+  const f=fixture(t),source={...mr(1),title:'Very long subject '.repeat(500)};
+  f.mrs.push(source);await f.configure({initial:'follow'});await f.gitlab.cycle();
+  assert.equal(f.gitlab.watch.status()!.jobs[0]!.state,'ready');const channel=f.channels[1];
+  assert.ok(channel.name.length<=100);assert.ok(channel.topic.length<=4000);
+  assert.ok(channel.topic.includes('…\nGitLab MR: '+source.web_url));assert.match(channel.topic,/Managed source: [a-f0-9]{24}/);
+});
+
+for(const recorded of [false,true])test('pre-upgrade lost create receipt preserves legacy metadata, recorded route: '+recorded,async t=>{
+  const f=fixture(t,true),source=mr(1);f.mrs.push(source);await f.configure({initial:'follow'});
+  const name='mr-42-1',marker=createHash('sha256').update(JSON.stringify(['p',source.web_url])).digest('hex').slice(0,24);
+  const topic=`GitLab MR: ${source.web_url}\nManaged source: ${marker}\nRaccolta aggiornamenti. Review e analisi solo su istruzione Human; nessuna pubblicazione automatica.`;
+  f.channels.push({id:'legacy',name,topic,type:'private',projectId:'p',memberIds:['human','brain']});
+  if(recorded)f.gitlab.db.prepare('INSERT INTO mr_routes(url,name,topic) VALUES (?,?,?)').run(source.web_url,name,topic);
+  f.reopen();await f.gitlab.cycle();
+  assert.equal(f.channels.length,2);assert.equal(f.gitlab.watch.status()!.jobs[0]!.state,'ready');
+  const route=f.gitlab.watch.status()!.routes[0]!;
+  assert.equal(route.channel,'legacy');assert.equal(route.name,name);assert.equal(f.channels[1].topic,topic);
+  assert.ok(!f.hiveCalls.includes('POST /api/ui/channels'));
+});
+
+for(const stopped of ['archived','unfollowed'] as const)test('existing legacy route keeps '+stopped+' source and Human contract without replay',async t=>{
+  const f=fixture(t,true),source=mr(1);f.mrs.push(source);await f.configure({initial:'follow'});await f.gitlab.cycle();
+  const channel=f.channels[1],route=f.gitlab.watch.status()!.routes[0]!;
+  // Model a retained pre-upgrade route with historical name/topic and events.
+  channel.name='mr-42-1';channel.topic='Retained legacy topic';
+  f.gitlab.db.prepare('UPDATE mr_routes SET name=?,topic=? WHERE url=?').run(channel.name,channel.topic,source.web_url);
+  f.rooms.get(channel.id).contract.instructions='Human custom rules; do not overwrite.';
+  if(stopped==='archived'){f.archive(channel.id,true);f.rooms.get(channel.id).state='archived';}
+  else f.gitlab.unfollow(String(route.subscription));
+  const before={channel:structuredClone(channel),room:structuredClone(f.rooms.get(channel.id)),events:f.gitlab.db.prepare('SELECT * FROM events').all()};
+  source.title='Changed title';f.reopen();await f.gitlab.cycle();
+  assert.equal(f.channels.length,2);assert.deepEqual(f.channels[1],before.channel);assert.deepEqual(f.rooms.get(channel.id),before.room);
+  assert.deepEqual(f.gitlab.db.prepare('SELECT * FROM events').all(),before.events);
+  assert.equal(f.gitlab.subscriptions().find(s=>s.id===route.subscription)!.enabled,stopped==='archived'?1:0);
+});
+
+test('unrelated descriptive-name collision blocks without adopting or creating an alternative',async t=>{
+  const f=fixture(t),source=mr(1);await f.configure();await f.gitlab.cycle();
+  f.channels.push({id:'unrelated',name:mrChannelName(42,1,source.title),type:'private',projectId:'p',memberIds:['human','brain'],topic:'Not this MR'});
+  f.mrs.push(source);await f.gitlab.cycle();
+  assert.equal(f.gitlab.watch.status()!.jobs[0]!.state,'blocked');assert.equal(f.channels.length,2);
+  assert.equal(f.gitlab.subscriptions().length,1);
+});
+
+test('manual follow cannot hide a conflicting descriptive discovery channel',async t=>{
+  const f=fixture(t),source=mr(1);f.mrs.push(source);await f.configure({initial:'follow'});
+  const channel=manualChannel(f);await f.gitlab.follow(source.web_url,channel.id);
+  f.channels.push({...channel,id:'other',name:mrChannelName(42,1,source.title)});
+  const before=structuredClone(f.channels);await f.gitlab.watch.cycle();
+  assert.equal(f.gitlab.watch.status()!.jobs[0]!.state,'blocked');assert.deepEqual(f.channels,before);
+});
+
+test('both legacy and descriptive unlinked channels block instead of choosing one',async t=>{
+  const f=fixture(t),source=mr(1);f.mrs.push(source);await f.configure({initial:'follow'});
+  for(const name of ['mr-42-1',mrChannelName(42,1,source.title)])f.channels.push({id:name,name,type:'private',projectId:'p',memberIds:['human','brain'],topic:'Existing'});
+  await f.gitlab.cycle();assert.equal(f.gitlab.watch.status()!.jobs[0]!.state,'blocked');
+  assert.equal(f.channels.length,3);assert.equal(f.gitlab.subscriptions().length,1);
+});
+
+test('a legacy channel appearing after a descriptive route was journaled blocks duplicate creation',async t=>{
+  const f=fixture(t),source=mr(1);f.mrs.push(source);await f.configure({initial:'follow'});
+  // A prior attempt persisted its new name, but did not reach channel creation.
+  f.gitlab.db.prepare('INSERT INTO mr_routes(url,name,topic) VALUES (?,?,?)')
+    .run(source.web_url,mrChannelName(42,1,source.title),'Pinned pending topic');
+  f.channels.push({id:'legacy',name:'mr-42-1',type:'private',projectId:'p',memberIds:['human','brain'],topic:'Existing legacy topic'});
+  await f.gitlab.cycle();assert.equal(f.gitlab.watch.status()!.jobs[0]!.state,'blocked');
+  assert.equal(f.channels.length,2);assert.equal(f.gitlab.subscriptions().length,1);
+  assert.ok(!f.hiveCalls.includes('POST /api/ui/channels'));
 });

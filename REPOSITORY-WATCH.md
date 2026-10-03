@@ -27,8 +27,31 @@ There is **one immutable repository/rule per profile** in this version. Repeatin
 - Default `--initial summary`: one bounded initial list (split if needed) in the summary channel. No MR channels, old-comment replay or reviews are created for existing matches.
 - `--initial follow`: also create channels for existing matches, without reviews or old-comment replay.
 - Later, `take-existing --id WATCH_ID` requests channels for **currently** matching MRs on the next scan. Repetition does not duplicate channels. It does not itself start a stopped monitor or override an archived source.
-- After initialization, newly matching MRs create/reconcile `mr-PROJECT_ID-IID`. This includes creation with the label, later addition, and observed add/remove transitions in GitLab label history. Initial event IDs are baselined, not replayed on restart.
+- After initialization, newly matching MRs create/reconcile `mr-IID-SUBJECT-pPROJECT_ID`, for example `mr-7-adopt-scene-lifecycle-p42`. This includes creation with the label, later addition, and observed add/remove transitions in GitLab label history. Initial event IDs are baselined, not replayed on restart.
 - Once enrolled, label removal/readdition, a title change or a later close/merge does not create a second channel or stop its monitoring. Final state changes remain observable. No automatic archive/reopen.
+
+### Recognizing an MR channel
+
+New channel names include a deterministic slug from the MR title. Draft/WIP,
+conventional-commit prefixes and leading ticket/platform labels are removed from
+the slug to leave room for the subject. The MR number and trailing GitLab project
+ID distinguish similar titles; names are bounded to 100 characters. Non-ASCII-only
+or empty subjects fall back to `merge-request`. No model is used.
+
+The channel topic starts with the title **at enrollment**, followed by the MR link
+and source marker. Only unusually long titles are truncated to fit the topic;
+the MR link is retained. Name and topic are pinned in the setup journal before
+channel creation and do not track later title edits. Subsequent observations
+(including health, comments, labels and approvals) show the title read with that
+snapshot, capped at 240 characters with an ellipsis when shortened.
+
+This is a plugin-only change: no Hivemind upgrade or database edit is needed.
+Existing `mr-PROJECT_ID-IID` channels, manual channels and interrupted legacy
+setups keep their names, IDs, histories, contracts and source state. They receive
+the clearer headings on future updates after the plugin monitor is reloaded;
+past messages are not rewritten or replayed merely for new formatting. A title
+edit is still a metadata event, not a new comment or health event. Conflicting
+legacy/new channels are reported, not automatically renamed, merged or deleted.
 
 ### Reusing an explicitly followed MR channel
 

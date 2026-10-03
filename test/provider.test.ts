@@ -159,7 +159,7 @@ test('changed health queues one compact observation and identical polls stay sil
   }
   const events=gitlab.db.prepare('SELECT event FROM events ORDER BY id').all().map(e=>JSON.parse(String(e.event)));
   assert.equal(events.length,6);
-  assert.ok(events.every(e=>e.origin.url===url && e.body.includes('MR !7 · merge health') && !e.body.includes('Invented')));
+  assert.ok(events.every(e=>e.origin.url===url && e.body.includes('MR !7 · Invented MR · merge health') && !e.body.includes('Invented comment')));
   assert.match(events[0].body,/Conflicts: YES/);assert.match(events[3].body,/Pipeline: #501 failed/);
   assert.equal(new Set(events.map(e=>e.eventId)).size,6);
   gitlab.close();gitlab=new GitLabBot(dir);
@@ -188,7 +188,7 @@ test('multiple MRs in one channel keep separate health histories and changed-MR 
   const jobs=gitlab.db.prepare('SELECT subscription,event FROM events').all();
   assert.equal(jobs.length,1);assert.equal(jobs[0]!.subscription,'two');
   const event=JSON.parse(String(jobs[0]!.event));
-  assert.equal(event.origin.url,secondUrl);assert.match(event.body,/MR !8 · merge health/);
+  assert.equal(event.origin.url,secondUrl);assert.match(event.body,/MR !8 · Invented MR · merge health/);
   assert.match(event.body,/Target: fixture/);assert.match(event.body,/Behind target: 3 commit/);
 });
 
@@ -235,4 +235,38 @@ test('recovering the fallback emits one health correction without reimporting no
   const events=gitlab.db.prepare('SELECT event FROM events').all();
   assert.equal(events.length,1);
   const event=JSON.parse(String(events[0]!.event));assert.match(event.body,/merge health/);assert.match(event.body,/Pipeline: #501 success · current head/);
+});
+
+test('all observation kinds show the current MR title without changing their value fingerprints',async t=>{
+  const dir=temp(t),data={...healthy,title:'feat(APP-123): calendar permissions',labels:['ready']};
+  const snapshot=await read(url,config,dir,async c=>{
+    const endpoint=c.args[1]!;
+    return {stdout:JSON.stringify(endpoint.includes('/discussions?')?[{id:'d',individual_note:false,notes:[note,{...note,id:102}]}]
+      :endpoint.includes('/resource_label_events?')?[{id:1,action:'add',created_at:mr.updated_at,label:{id:9,name:'ready'}}]
+      :endpoint.endsWith('/approvals')?{iid:7,project_id:12,approved:true,approved_by:[{user:{id:1,username:'reviewer',name:'Reviewer'}}]}
+      :data)};
+  },undefined,['comment','health','metadata','label','approval']);
+  assert.deepEqual(snapshot.observations.map(o=>o.key),['mr','health','note:101','note:102','label-event:1','approval']);
+  for(const o of snapshot.observations) {
+    assert.ok(o.body.includes('MR !7 · '+data.title),o.key);
+    if(o.key!=='mr')assert.ok(!JSON.stringify(o.value).includes(data.title),'title is display-only for '+o.key);
+  }
+});
+
+test('heading upgrade never replays old observations; title edits only change metadata',async t=>{
+  const dir=temp(t);init(dir,config);let gitlab=new GitLabBot(dir);t.after(()=>gitlab.close());
+  gitlab.db.prepare("INSERT INTO subscriptions(id,url,channel,bot,enabled,initial) VALUES ('s',?,'legacy-channel','b',1,'baseline')").run(url);
+  const sub=()=>gitlab.subscriptions()[0]!;
+  const old=await readFixture(dir,healthy);
+  for(const o of old.observations)o.body='Old pre-upgrade heading';
+  assert.equal(gitlab.apply(sub(),old),0);gitlab.close();gitlab=new GitLabBot(dir);
+  assert.equal(gitlab.apply(sub(),await readFixture(dir,healthy)),0);
+  const renamed={...healthy,title:'New title'};
+  assert.equal(gitlab.apply(sub(),await readFixture(dir,renamed)),1);
+  const failed={...renamed,head_pipeline:{...healthy.head_pipeline,status:'failed'}};
+  assert.equal(gitlab.apply(sub(),await readFixture(dir,failed)),1);
+  assert.equal(gitlab.apply(sub(),await readFixture(dir,failed)),0);
+  const events=gitlab.db.prepare('SELECT event FROM events ORDER BY id').all().map(e=>JSON.parse(String(e.event)));
+  assert.equal(events.length,2);assert.match(events[0].body,/New title\nState:/);
+  assert.match(events[1].body,/New title · merge health/);assert.match(events[1].body,/Pipeline: #501 failed/);
 });
